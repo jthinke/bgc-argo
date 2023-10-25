@@ -1,0 +1,565 @@
+---
+title: "Data, Figure 1, and auxiliary plots"
+output: html_notebook
+---
+
+Calculate the tag stats for each tag. Do it on the full meop dataset. For each tag calculate determine the origin, and then the distance traveled from the origin at each point. Then for each tag calculate the mean and maximum distance traveled, and look at the stats on a tag basis.
+
+
+Initial tag numbers: N=97 for penguins and N=1029 for eseals. 
+(tracks and TagStats)
+
+Restrict SES to only those tagged between 50W-130E; N=97, N=360 
+(tracks2 and TagStats2)
+
+Since interested in overwintering behavior restrict tags analyzed to those with data in May or later and more than 10 days of tag data  
+N=74, N=315 
+(tracks3, TagStats3)
+
+For full dataset of tags calculate: ID, cycle, longitude, month, spp, project
+
+Define: origin, lon0, lat0, distance
+
+For each tag: ID, spp, project, n, nday, time0, time1, lon0, lon1, lat0, lat1, mindist, maxdist, meandist
+
+```{r install libraries}
+# Function to check if pkgs are installed, and install any missing pkgs
+
+pkgTest <- function(x)
+{
+  if (!require(x,character.only = TRUE))
+  {
+    install.packages(x,dep=TRUE,repos='http://cran.us.r-project.org')
+    if(!require(x,character.only = TRUE)) stop(x, " :Package not found")
+  }
+}
+
+# create list of required packages
+list.of.packages <- c("ncdf4", "here", "lubridate","rerddap",
+                      "geosphere","ggplot2","gridExtra", "ggspatial",
+                      "ggOceanMaps", "orsifronts", "sf") 
+                      
+# create list of installed packages
+pkges = installed.packages()[,"Package"]
+
+# Install and load all required pkgs
+for (pk in list.of.packages) {
+  pkgTest(pk)
+}
+
+```
+
+```{r Get Penguin data}
+# chpe track data inlucde data from Hinke et al. 2017 and 2019, Trivelpiece et al 2007, and unpublished tracks. 
+
+tracks <- read.csv(here("data/tracks/chpe_data.csv"))
+tracks$date <- as.POSIXct(tracks$date, format="%m/%d/%Y %H:%M:%S")
+tracks <- subset(tracks, !is.na(date)) 
+
+names(tracks)[names(tracks) == "lon"] <- "Longitude"
+names(tracks)[names(tracks) == "lat"] <- "Latitude"
+names(tracks)[names(tracks) == "lc"] <- "LQC"
+
+#tracks <- subset(tracks, spp=="CHPE")
+tracks$cycle <- tracks$X
+tracks <- tracks[,-1]
+tracks$project  <- rep("AMLR",length(tracks$cycle))
+```
+
+```{r Determine cycle number for penguins}
+ntag <- length(unique(tracks$id))
+
+for (i in (1:ntag)) {
+  tag <- unique(tracks$id)[i] 
+  index <- which(tracks$id==tag)
+  nn <- length(subset(tracks, id==tag)$id)
+  tracks$cycle[index] <- seq(nn)
+    }
+  
+```
+
+```{r Get MEOP Data, retrieve from raw data as want cycle data and all tags}
+
+meop <- read.csv(here("data/tracks/list_profiles.csv"))
+meop$Date <- as.POSIXct(meop$JULD, format="%m/%d/%y %H:%M", tz="GMT")
+
+names(meop)[names(meop) == "LATITUDE"] <- "Latitude"
+names(meop)[names(meop) == "LONGITUDE"] <- "Longitude"
+
+meop <- meop[meop$MASK=="Southern Ocean",]
+  
+```
+
+```{r rearrange meop data}
+
+eseal_m <- data.frame(id=meop$SMRU_PLATFORM_CODE,
+                      Longitude=meop$Longitude,
+                      Latitude=meop$Latitude,
+                      LQC=rep(0,length(meop$JULD)),
+                      date=meop$Date, 
+                      spp=rep("SES",length(meop$JULD)),
+                      site=rep("SO",length(meop$JULD)),
+                      month=meop$month, 
+                      cycle=meop$CYCLE_NUMBER,
+                      project=rep("MEOP",length(meop$JULD))) 
+```
+
+```{r Get TOPP data from ERDDAP, N=32 }
+
+topp <- rerddap::tabledap("gtoppAT",url="https://coastwatch.pfeg.noaa.gov/erddap/",
+                               fields=c('longitude','latitude','time','toppID',
+                                        'commonName','project','LC'),
+                               'latitude<=-40',
+                               'commonName="Southern Elephant Seal"')
+
+  topp$longitude <- as.numeric(topp$longitude)
+  topp$latitude <- as.numeric(topp$latitude)
+  topp$time <- as.POSIXct(topp$time,"%Y-%m-%dT%H:%M:%S",tz='GMT')
+  topp$month <- month(topp$time)
+```
+
+```{r rearrange topp data}
+
+eseal_t <- data.frame(id=topp$toppID,
+                      Longitude=topp$longitude,
+                      Latitude=topp$latitude,
+                      LQC=topp$LC,
+                      date=topp$time, 
+                      spp=rep("SES",length(topp$time)),
+                      site=rep("SO",length(topp$time)),
+                      month=topp$month, 
+                      cycle=rep(0,length(topp$time)),
+                      project=rep("TOPP",length(topp$time))) 
+```
+
+```{r Determine cycle for topp data }
+
+ntag <- length(unique(eseal_t$id))
+
+for (i in (1:ntag)) {
+  tag <- unique(eseal_t$id)[i] 
+  index <- which(eseal_t$id==tag)
+  nn <- length(subset(eseal_t, id==tag)$id)
+  eseal_t$cycle[index] <- seq(nn)
+    }
+  
+```
+
+```{r merge datasets}
+
+ tracks <- rbind(tracks,eseal_m, eseal_t)
+
+# Make logitudes all between -180 and 180 
+
+tracks$Longitude[tracks$Longitude > 180] <- tracks$Longitude[tracks$Longitude > 180]-360
+
+```
+
+```{r Determine tag origin, set flag for bloom tags}
+
+# RB indicates a point in the bloom area 
+# RB2 indicates that the tag enters the bloom area at some point 
+
+tracks$lon1 <- tracks$Longitude
+tracks$lat1 <- tracks$Latitude
+tracks$RB <- rep(0,length(tracks$id)) 
+tracks$RB <- ifelse((tracks$Longitude<(-110)&tracks$Longitude>(-165)&tracks$Latitude>(-65)&tracks$Latitude<(-55)),1,tracks$RB)
+tracks$RB2 <- rep(0,length(tracks$id))
+
+for (i in (1:length(unique(tracks$id)))) {
+   tag <- unique(tracks$id)[i]
+   lon1 <- subset(tracks, (id==tag & cycle==1))$Longitude
+   lat1 <- subset(tracks, (id==tag & cycle==1))$Latitude
+   index <- which(tracks$id==tag)
+   
+   tracks$lon1[index] <- lon1
+   tracks$lat1[index] <- lat1
+   if (sum((tracks$RB)[index]) > 0) {tracks$RB2[index] <- 1}
+   
+}
+
+```
+
+```{r calculate distance from origin for each point}
+
+np <- length((tracks$id))
+tracks$distance <- rep(0,np)
+
+for (i in (1:np)) {
+   tracks$distance[i] <- drop(distm(c(tracks$Longitude[i], tracks$Latitude[i]),
+                        c(tracks$lon1[i], tracks$lat1[i]), 
+                        fun = distGeo))/1000
+}
+```
+
+```{r Create new data frame with stats for each tag}
+
+for (i in (1:length(unique(tracks$id)))) {
+  
+   tag <- unique(tracks$id)[i] 
+   temp <- subset(tracks, id==tag) 
+   
+   nb <- sum(temp$RB)
+   
+   temp2 <- data.frame(id=tag,
+                      spp=unique(temp$spp),
+                      site=unique(temp$site),
+                      project=unique(temp$project),
+                      n=length(temp$id),
+                      ndays=difftime(max(temp$date), min(temp$date), units ="days"),
+                      time0=min(temp$date),
+                      time1=max(temp$date),
+                      lon1=unique(temp$lon1),
+                      lat1=unique(temp$lat1),
+                      minlat=min(temp$Latitude),
+                      maxlat=max(temp$Latitude),
+                      minlon=min(temp$Longitude),
+                      maxlon=max(temp$Longitude),
+                      mindist=min(temp$distance),
+                      maxdist=max(temp$distance),
+                      mndist=mean(temp$distance),
+                      RB=nb,
+                      lon2=temp$Longitude[which.max(temp$distance)],
+                      lat2=temp$Latitude[which.max(temp$distance)])
+                      
+if (i==1) {TagStats <- temp2}
+if (i!=1) {TagStats <- rbind(TagStats,temp2)}
+}
+
+TagStats$ndays <- as.numeric(TagStats$ndays)
+TagStats$RB2 <- TagStats$RB
+
+TagStats$RB2[TagStats$RB2 >  1] <- 1
+```
+
+
+```{r Create subset of data with SES restricted to those tagged between 50W and 130E }
+
+TagStats2 <- subset(TagStats, (lon1 < (-50) | lon1 > 130))
+tracks2 <- subset(tracks, (lon1 < (-50) | lon1 > 130))
+
+```
+
+```{r Create subset of tags which have overwintering data}
+
+TagStats3 <- subset(TagStats2, (month(time1) > 3 & ndays > 10)) 
+
+ids <- unique(TagStats3$id)
+tracks3 <- tracks2[tracks2$id %in% ids,]
+# Retain tracks3 for figures 2 and 3
+my_wd<-getwd()
+file4<-paste(my_wd, "/data/tracks/tagstats3.csv", sep="")
+write.csv(TagStats3, file4)
+rm(file4)
+file3=paste(my_wd, "/data/tracks/tracks3.csv", sep="")
+write.csv(tracks3, file3)
+rm(file3)
+```
+
+
+```{r Plot Tag stats }
+
+#filename <- (here('TagStatsHist.png'))
+
+temp <- subset(TagStats,spp=="CHPE")
+
+p1 <- ggplot(subset(TagStats,spp=="CHPE"), aes(x=maxdist)) + 
+  geom_histogram(aes(y = after_stat(count / sum(count))),binwidth=100) +
+  xlab("Maximum Distance (km)") + ylab("Percentage") + 
+  scale_x_continuous(expand = c(0,0),lim=c(0,5250)  ) + 
+  scale_y_continuous(labels = scales::percent,expand = c(0,0) ) + 
+  ggtitle("Penguins")
+
+ p2 <- ggplot(subset(TagStats,spp=="CHPE"), aes(x=mndist)) + 
+  geom_histogram(aes(y = after_stat(count / sum(count))),binwidth=50) +
+  xlab("Mean Distance (km)") + ylab("Percentage") + 
+  scale_x_continuous(expand = c(0,0),lim=c(0,4250)) + 
+  scale_y_continuous(labels = scales::percent,expand = c(0,0) ) + 
+  ggtitle("Penguins")
+
+   temp <- subset(TagStats,(spp=="CHPE"))
+p3 <- ggplot(subset(TagStats,spp=="SES"), aes(x=maxdist)) + 
+  geom_histogram(aes(y = after_stat(count / sum(count))),binwidth=50) +
+  xlab("Maximum Distance (km)") + ylab("Percentage") + 
+  scale_x_continuous(expand = c(0,0), lim=c(0,5250)) + 
+  scale_y_continuous(labels = scales::percent,expand = c(0,0) ) + 
+  ggtitle("Elephant Seals")
+
+ p4 <- ggplot(subset(TagStats,spp=="SES"), aes(x=mndist)) + 
+  geom_histogram(aes(y = after_stat(count / sum(count))),binwidth=50) +
+  xlab("Mean Distance (km)") + ylab("Percentage") + 
+  scale_x_continuous(expand = c(0,0),lim=c(0,4250)) + 
+  scale_y_continuous(labels = scales::percent,expand = c(0,0) ) + 
+  ggtitle("Elephant Seals")
+ 
+ grid.arrange(p1,p2,p3,p4)
+ 
+ g <- arrangeGrob(p1,p2,p3,p4)
+ g
+ #ggsave(filename=filename, g)
+```
+
+
+```{r Plot Figure 1}
+
+filename <- (here('Figure_1.pdf'))
+
+temp <- subset(TagStats3,spp=="CHPE")
+rb <- subset(temp, (RB >0 & maxdist > 1)) 
+
+n <- length(temp$n) 
+mn <- mean(temp$maxdist) 
+sd <- sd(temp$maxdist) 
+
+p1 <- ggplot(temp, aes(x=maxdist)) + 
+  geom_rect(temp, mapping=aes(xmin=50, xmax=mn+sd, ymin=-Inf, ymax=+Inf),              fill="yellow", alpha=0.01, inherit.aes = FALSE) + 
+  geom_histogram(aes(y = after_stat(count / sum(count))),binwidth=100) +
+#  geom_histogram(bins=100) +
+  geom_vline(xintercept = mn) +
+  xlab("Maximum Distance (km)") + ylab("Percentage") + 
+  scale_x_continuous(expand = c(0,0), lim=c(50,4900)) + 
+  scale_y_continuous(labels = scales::percent,expand = c(0,0),lim=c(0,.20) ) + 
+  ggtitle("Penguins") + 
+  annotate("text", x = 4500, y = .17, label = paste("N = ",n)) + 
+  geom_point(data=rb, aes(x=maxdist, y=mindist+.001), shape=23, color="black", fill="red",size=3)
+
+temp <- subset(TagStats3, (spp=="SES"))
+rb <- subset(temp, (RB >0 & maxdist > 1)) 
+
+n <- length(temp$n) 
+mn <- mean(temp$maxdist) 
+sd <- sd(temp$maxdist) 
+
+p2 <- ggplot(temp, aes(x=maxdist)) + 
+  geom_rect(temp, mapping=aes(xmin=50, xmax=mn+sd, ymin=-Inf, ymax=+Inf), fill="yellow", alpha=0.01, inherit.aes = FALSE) + 
+  
+  geom_histogram(aes(y = after_stat(count / sum(count))),binwidth=100) +
+#  geom_histogram(bins=100) +
+  geom_vline(xintercept = mn) +
+  xlab("Maximum Distance (km)") + ylab("Percentage") + 
+  scale_x_continuous(expand = c(0,0), lim=c(50,4900)) + 
+  scale_y_continuous(labels = scales::percent,expand = c(0,0),lim=c(0,.20)) + 
+  ggtitle("Elephant Seals") + 
+  annotate("text", x = 4500, y = .17, label = paste("N = ",n)) + 
+  geom_point(data=rb, aes(x=maxdist, y=mindist+.001), shape=23, color="black", fill="red",size=3)
+
+ grid.arrange(p1,p2)
+ 
+ g <- arrangeGrob(p1,p2)
+ ggsave(filename=filename, g)
+
+
+```
+
+```{r Get stats on tag stats }
+
+# How many tags enter the Ross Sea Bloom area between -110 and -165? 
+
+rba <- subset(tracks,(Longitude < (-110) & Longitude > (-165)))
+length(unique(rba$id))
+length(subset(rba,spp=="CHPE")$date)
+
+length(subset(TagStats, RB>0)$RB)
+length(subset(TagStats, (spp=="CHPE" & RB>0))$RB)
+length(subset(TagStats, (spp=="SES" & RB>0))$RB)
+
+length(unique(subset(tracks2,spp=="CHPE")$id))
+length(unique(subset(tracks2,spp=="SES")$id))
+
+length(subset(tracks,spp=="CHPE")$id)
+length(subset(tracks,spp=="SES")$id)
+
+length(unique(subset(tracks,(spp=="SES" & (lon1 < (-50) | lon1 > 130)))$id))
+length(subset(tracks,(spp=="SES" & (lon1 < (-50) | lon1 > 130)))$id)
+```
+
+```{r Get mean and sd on tag stats }
+
+# calculate mean and sd of all tracks by species 
+
+temp <- subset(TagStats3,spp=="CHPE")[,c(5,6,16,17)]
+
+apply(temp,2,mean, na.rm=T)
+apply(temp,2,sd, na.rm=T)
+
+temp <- subset(TagStats3,(spp=="CHPE" & RB>0))[,c(5,6,16,17)]
+
+apply(temp,2,mean, na.rm=T)
+apply(temp,2,sd, na.rm=T)
+
+
+temp <- subset(TagStats3,spp=="SES")[,c(5,6,16,17)]
+
+apply(temp,2,mean, na.rm=T)
+apply(temp,2,sd, na.rm=T)
+
+temp <- subset(TagStats3,(spp=="SES" & RB>0))[,c(5,6,16,17)]
+
+apply(temp,2,mean, na.rm=T)
+apply(temp,2,sd, na.rm=T)
+
+
+```
+
+```{r Get origin points}
+
+rb <- subset(TagStats, RB>0)
+
+for (i in 1:length(rb$RB)) {
+  print(c(rb$project[i],rb$lon1[i],rb$lat1[i]))
+}
+
+
+```
+
+```{r Plot tag spots of RB tags}
+
+rb <- subset(TagStats, RB>0)
+
+#filename <- (here('BloomTagOrigins.png'))
+basemap(-50) + 
+  geom_spatial_point(data = rb,
+   aes(x = lon1, y = lat1), shape=21,color="red",fill="black",cex=1) +
+  xlab("") +  ylab("") +ggtitle("Ross Sea tag spots")
+
+#ggsave(filename=filename)
+```
+```{r get out ACC fronts of interest}
+sf_orsi<- sf::st_as_sf(orsifronts, coords=c("x","y"))
+sf_orsi<-sf::st_set_crs(sf_orsi, 4326)
+#sf_orsi<-sf::st_crop(orsi, y=c(xmin=-270, ymin=-90, xmax=0 ,ymax=-48))
+sf_orsi<-sf::st_transform(sf_orsi, 3031)
+#saf<-sf_orsi[sf_orsi$front=="saf",]
+NB<-sf_orsi[sf_orsi$front=="pf",]
+SB<-sf_orsi[sf_orsi$front=="sbdy",]
+
+```
+
+```{r plot monthly locations of e-seals color coded by distance}
+facetlabel <- month.abb[1:12]
+
+#filename <- (here("Eseal_Maps2.png"))
+
+mypal <- RColorBrewer::brewer.pal(n = 8, name = "YlGnBu")
+
+basemap(-50) + 
+  geom_spatial_point(data = subset(tracks,(spp=="SES" & (lon1 < (-50) | lon1 > 130))),
+   aes(x = Longitude, y = Latitude, color=distance), shape=15,cex=.2) +
+   scale_color_gradientn(colours = mypal,limits = c(0,5000),oob=scales::squish) + 
+   xlab("") +  ylab("") + 
+   geom_sf(data = SB) +
+   geom_sf(data = NB) + 
+   facet_wrap(~ factor(month, labels = facetlabel)) 
+
+#ggsave(filename=filename)
+
+```
+
+```{r map tracks, color code by RB designation}
+
+#filename <- (here("2Maps_RB2.png"))
+
+basemap(-50) + 
+  geom_spatial_point(data = subset(tracks,(lon1 < (-50) | lon1 > 130)),
+                     aes(x = Longitude, y = Latitude, color=as.factor(RB2)), shape=15,cex=.2) +
+  #   scale_color_gradientn(colours = mypal,limits = c(0,5000),oob=scales::squish) + 
+  xlab("") +  ylab("") + 
+  geom_sf(data=SB)+
+  geom_sf(data=NB)+
+  facet_wrap(~ factor(spp)) 
+
+#ggsave(filename=filename)
+
+```
+```{r Plot tagging locations of all SES}
+
+#filename <- (here("SES_origin.png"))
+
+basemap(-50) + 
+  geom_spatial_point(data = TagStats2,
+                     aes(x = lon1, y = lat1, color=as.factor(RB2)), shape=15,cex=.2) +
+  #   scale_color_gradientn(colours = mypal,limits = c(0,5000),oob=scales::squish) + 
+  xlab("") +  ylab("") + 
+  geom_sf(data=SB)+
+  geom_sf(data=NB)
+  
+#ggsave(filename=filename)
+```
+
+
+```{r Determine how mag SES at each tagging spot }
+
+#1: 
+length(subset(TagStats2,(spp=="SES" & (lon1 > -70) & (lon1 < 0) & (lat1 > -60)))$id)
+
+#2: 
+length(subset(TagStats2,(spp=="SES" & (lon1 > -90) & (lon1 < -70) & (lat1 > -60)))$id)
+
+#3: SS1
+length(subset(TagStats2,(spp=="SES" & (lon1 > -90) & (lon1 < 0) & (lat1 < -60)))$id)
+
+#4: SS1
+length(subset(TagStats2,(spp=="SES" & (lon1 < -90) & (lon1 > -145)))$id)
+
+#5: 
+length(subset(TagStats2,(spp=="SES" & (lon1 >135) & (lat1 < -70)))$id)
+
+#6: 
+length(subset(TagStats2,(spp=="SES" & (lon1 >135) & (lat1 < -60) & (lat1 > -70)))$id)
+```
+
+
+```{r make plots of Tag by years and tagging origin}
+
+ ggplot(TagStats2, aes(year(time0),fill=spp)) + geom_histogram(bins=20,position = 'dodge')
+
+ ggplot(TagStats2, aes(lon1,fill=spp)) + geom_histogram(bins=180, position = 'dodge')
+
+ ggplot(TagStats2, aes(ndays,fill=spp)) + geom_histogram(bins=50,position = 'dodge')
+```
+
+```{r Make map of positions of maximum distance}
+
+bloomarea <- data.frame(x=c(-110,-165,-165,-110,-110),y=c(-55,-55,-65,-65,-55))
+bloomarea <- transform_coord(bloomarea, bind = TRUE)
+
+#filename <- (here("Map_MaxDist.png"))
+
+basemap(-50) + 
+  #  geom_spatial_polygon(data = bloomarea, aes(x = x, y = y), color = "yellow") + 
+  geom_spatial_point(data = subset(TagStats2, maxdist > 3000),
+                     aes(x = lon2, y = lat2, color=maxdist), shape=15) +
+  scale_color_gradientn(colours = mypal) + 
+  xlab("") +  ylab("") + 
+  geom_sf(data=SB)+
+  geom_sf(data=NB)+
+  facet_wrap(~ factor(spp)) 
+
+#ggsave(filename=filename)
+
+```
+
+```{r make histograms of tagging dates}
+
+ggplot(TagStats, aes(x=yday(time0), color=spp)) + geom_histogram() 
+
+ggplot(tracks2, aes(x=yday(date), color=spp)) + geom_histogram() 
+```
+```{r nday vs maxdist plot}
+
+#filename <- (here("ndays_MaxDist.png"))
+
+ggplot(TagStats2, aes(y=maxdist, x=ndays, color=spp)) +
+  geom_point() + 
+  scale_x_continuous(expand = c(0,0))+ 
+  scale_y_continuous(expand = c(0,0))
+
+
+#ggsave(filename=filename)  
+```
+
+```{r tidy up the workspace}
+
+rm(eseal_m, eseal_t, facetlabel, filename, g, i, ids, index, lat1, list.of.packages, lon1, meop, mn, mypal, n, nb, nn, np, ntag, p1, p2, p3, p4, pk, pkges, pkgTest,rba, rb,sd, tag, TagStats, TagStats2, TagStats3, temp, temp2, topp, tracks, tracks2, tracks3)
+```
+

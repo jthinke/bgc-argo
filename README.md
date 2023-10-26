@@ -9,6 +9,6 @@ Run `Data and Figure 1.Rmd` first to generate the subset of tracking data used i
 The data files used in this analysis, including tracking data sets, circumpolar bathymetry, winter sea ice extent, and global coastline shapefiles exceed limits for storage on Github. We are working on a solution for access. The code expects the following data folder structure:
 * data
   + bathymetry
-  + shapefiles
+  + coastline
   + ice
   + tracks

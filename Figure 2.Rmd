@@ -54,8 +54,8 @@ plot_figure_2<-function(){
   bloom_deps<-tt_sum$id[tt_sum$RB2==1]
   tt<-tt[tt$id%in%bloom_deps,]
   
-  ice_layer<-paste(my_wd, "/data/ice2017_6", sep="")
-  mask_layer<-paste(my_wd, "/data/gshhg_shp/", sep="")
+  ice_layer<-paste(my_wd, "/data/ice", sep="")
+  mask_layer<-paste(my_wd, "/data/coastline/", sep="")
   bathy_layer<-paste(my_wd, "/data/bathymetry/ETOPO2v2c_f4.nc", sep="")
   
   # create sf geometries

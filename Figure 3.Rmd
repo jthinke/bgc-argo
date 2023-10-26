@@ -192,10 +192,10 @@ plot_figure_3<-function(){
     ylab("Speed (m/s)")+
     theme_bw()  
 
-  windows()
+  #windows()
   plot(p3)
-  savePlot(filename="Figure_3.pdf", type="pdf")
-  windows()
+  #savePlot(filename="Figure_3.pdf", type="pdf")
+  #windows()
 }
 ```  
 

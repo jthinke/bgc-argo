@@ -130,13 +130,13 @@ plot_figure_2<-function(){
       xy <- sf::st_as_sf(xy, coords = c("x","y"))
       xy<-sf::st_set_crs(xy, 4326)
       xy<-sf::st_transform(xy, 3031)
-      nc<-length(xy$geometry)
+      nc<-round(length(xy$geometry)/2,0)
       text.xy<-sf::st_coordinates(xy)[nc,]
       text(x=text.xy[1]+250000, y=text.xy[2], labels=lats[j], cex=0.66)
       plot(xy$geometry, type="l", lty=1, lwd=0.25, col="gray", add=TRUE)
     }
     
-    longs<-seq(from=-180, by=20, to=180)
+    longs<-seq(from=-180, by=20, to=160)
     lats<-seq(from=-80, by=5, to=-45)
     nlongs<-length(longs)
     nlats<-length(lats)
@@ -187,7 +187,7 @@ plot_figure_2<-function(){
     plot(sbdy$geometry, axes=FALSE, col=1, add=TRUE, lty=1)
     plot(pf$geometry, axes=FALSE, col=1, add=TRUE, lty=2)
     
-    legend(x=500000, y=480000,
+    legend(x=6500000, y=480000,
            title="Monthly positions",
            legend=c("Feb","Mar","Apr","May","Jun","Jul",
                     "Aug","Sep","Oct","Nov"),
@@ -196,7 +196,7 @@ plot_figure_2<-function(){
                         "#de77ae","#f1b6da"),
            pt.cex=1,
            bty="n")
-    savePlot(filename=fileName, type="pdf")
+    #savePlot(filename=fileName, type="pdf")
   }
   #now recreate this with a kernel density estimate for the projected points
   
@@ -251,13 +251,13 @@ plot_figure_2<-function(){
     xy<- sf::st_as_sf(xy, coords = c("x","y"))
     xy<-sf::st_set_crs(xy, 4326) 
     xy<-sf::st_transform(xy, 3031)
-    nc<-length(xy$geometry)
+    nc<-round(length(xy$geometry)/2,0)
     text.xy<-sf::st_coordinates(xy)[nc,]
     text(x=text.xy[1]+250000, y=text.xy[2], labels=lats[j], cex=0.66)
     plot(xy$geometry, type="l", lty=1, lwd=0.25, col="gray", add=TRUE)
   }
   
-  longs<-seq(from=-180, by=20, to=180)
+  longs<-seq(from=-180, by=20, to=160)
   lats<-seq(from=-80, by=5, to=-45)
   nlongs<-length(longs)
   nlats<-length(lats)
@@ -294,7 +294,7 @@ plot_figure_2<-function(){
  
   plot(sbdy$geometry, lty=1, add=TRUE)
   plot(pf$geometry, lty=2,  add=TRUE)
-  savePlot(filename=fileName, type="pdf")
+  #savePlot(filename=fileName, type="pdf")
   }
   #windows()
   #

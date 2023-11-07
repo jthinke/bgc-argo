@@ -161,8 +161,8 @@ plot_figure_2<-function(){
     #ice.col<-adjustcolor("grey40", alpha.f=0.5)
     ice.col<-"#6C8896"
     plot(ice$geometry, col=ice.col, border=ice.col, add=TRUE)
-    plot(ant$geometry, axes=FALSE, col="gray10", add=TRUE, lwd=0.1)
-    plot(isl$geometry, axes=FALSE, col="gray10", add=TRUE, lwd=0.1)
+    plot(ant$geometry, axes=FALSE, col="#1A1A1A", add=TRUE, lwd=0.1)
+    plot(isl$geometry, axes=FALSE, col="#1A1A1A", add=TRUE, lwd=0.1)
     mons<-unique(tt$month)
     nmons<-length(mons)
   
@@ -281,8 +281,8 @@ plot_figure_2<-function(){
   }
   ice.col<-"#6C8896"
   plot(ice$geometry, col=ice.col, border=ice.col, add=TRUE)
-  plot(ant$geometry, col="black", add=TRUE)
-  plot(isl$geometry, col="black", add=TRUE)
+  plot(ant$geometry, col="#1A1A1A", add=TRUE)
+  plot(isl$geometry, col="#1A1A1A", add=TRUE)
   
   # set fully transparent white for 0-value kde estimates?
   f1<-kdes[[i]]

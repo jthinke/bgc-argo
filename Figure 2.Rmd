@@ -110,7 +110,7 @@ plot_figure_2<-function(){
   for(i in 1:2){
     #
     panels<-c("a","b")
-    fileName<-paste("Figure_2", panels[i], ".pdf", sep="")
+    fileName<-paste("Figure_2", panels[i], ".eps", sep="")
     
     #windows()
     bathycols<-colorRampPalette(c("gray10", "gray90"))
@@ -159,7 +159,7 @@ plot_figure_2<-function(){
       text(x=text.xy[1], y=text.xy[2], labels=longs[k], cex=0.66, srt=-longs[k])
     }
     #ice.col<-adjustcolor("grey40", alpha.f=0.5)
-    ice.col<-"aquamarine"
+    ice.col<-"#6C8896"
     plot(ice$geometry, col=ice.col, border=ice.col, add=TRUE)
     plot(ant$geometry, axes=FALSE, col="gray10", add=TRUE, lwd=0.1)
     plot(isl$geometry, axes=FALSE, col="gray10", add=TRUE, lwd=0.1)
@@ -196,7 +196,7 @@ plot_figure_2<-function(){
                         "#de77ae","#f1b6da"),
            pt.cex=1,
            bty="n")
-    #savePlot(filename=fileName, type="pdf")
+    #savePlot(filename=fileName, type="eps")
   }
   #now recreate this with a kernel density estimate for the projected points
   
@@ -229,10 +229,10 @@ plot_figure_2<-function(){
   rm(f1, f2)
   for(i in 1:2){
     panels<-c("c","d")
-    fileName<-paste("Figure_2", panels[i], ".pdf", sep="")
+    fileName<-paste("Figure_2", panels[i], ".eps", sep="")
   #windows()
-  colx<-colorRampPalette(c("white","red"))
-  coly<-colorRampPalette(c("lightblue","navy"))
+  colx<-colorRampPalette(c("white","#d95f02"))
+  coly<-colorRampPalette(c("lightblue","#7570b3"))
   coll<-list(colx=colx, coly=coly)
   bathycols<-colorRampPalette(c("gray10", "gray90"))
   plot(pf$geometry, axes=FALSE, col=1, xlim=c(-5e+06, 5e+06), ylim=c(-5.1e+06, 5e+06))
@@ -279,7 +279,7 @@ plot_figure_2<-function(){
     text.xy<-sf::st_coordinates(text.xy)
     text(x=text.xy[1], y=text.xy[2], labels=longs[k], cex=0.66, srt=-longs[k])
   }
-  ice.col<-"aquamarine"
+  ice.col<-"#6C8896"
   plot(ice$geometry, col=ice.col, border=ice.col, add=TRUE)
   plot(ant$geometry, col="black", add=TRUE)
   plot(isl$geometry, col="black", add=TRUE)
@@ -294,7 +294,7 @@ plot_figure_2<-function(){
  
   plot(sbdy$geometry, lty=1, add=TRUE)
   plot(pf$geometry, lty=2,  add=TRUE)
-  #savePlot(filename=fileName, type="pdf")
+  #savePlot(filename=fileName, type="eps")
   }
   #windows()
   #

@@ -1,5 +1,5 @@
 # bgc-argo
-R code to support analysis of tracking data and B-SOSE output
+R code to support analysis of tracking data and B-SOSE output. 
 ## Code
 The code here inlcudes fuctionality to import and format data, and the to plot Figures 1-3. Figure 4, highlighting B-SOSE model output, was made with Matlab and we're working to bring that in here. 
 

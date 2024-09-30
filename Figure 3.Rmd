@@ -8,7 +8,7 @@ knitr::opts_chunk$set(echo = FALSE)
 ```
 
 
-This is code that defines and runs a function to plot Figure 2. 
+This is code that defines and runs a function to plot Figure 3. 
 ```{r install libraries}
 # Function to check if pkgs are installed, and install any missing pkgs
 
@@ -22,7 +22,9 @@ pkgTest <- function(x)
 }
 
 # create list of required packages
-list.of.packages <- c("sf", "dplyr", "tidyr", "ggplot2", "lubridate", "geosphere") 
+list.of.packages <- c("sf", "dplyr", "ggplot2", "lubridate","orsifronts",
+                      "viridis","ncdf4","raster", "fields","gridExtra",
+                      "MASS", "adehabitatLT") 
                       
 # create list of installed packages
 pkges = installed.packages()[,"Package"]
@@ -34,10 +36,9 @@ for (pk in list.of.packages) {
 
 ```
 
-```{r Define necesssary functions}
 
 # auxiliary function to compute daily average position and time of locatoin estimates
-
+```{r auxiliary function to standardize tracking data to daily mean poisition}
 summarize_by_day<-function(x){
   x$day<-lubridate::yday(x$date)
   mlon<-tapply(x$lon360, x$day, mean)
@@ -49,95 +50,44 @@ summarize_by_day<-function(x){
                   date=mdate, spp=rep(x$spp[1], nx), site=rep(x$site[1],nx))
   out$date<-as.character(out$date)
   out$day<-lubridate::yday(out$date)
+  out$month<-lubridate::month(out$date)
   out
 }
+```
+# Define function for plotting
 
-# auxiliary function to bin data by longitude
-
-bin_func<-function(data,  bin_size){
-  # bin a vector
-  dat<-data.frame(data=data)
-  dat.r<-range(pretty(range(dat$data), n=10))
-  bins<-seq(from=dat.r[1], by=bin_size, to=dat.r[2])
-  n.bins<-length(bins)-1
-  dat$index<-1:length(dat$data)
-  out<-list()
-  for(i in 1:n.bins){
-    #print(i)
-    dat.b<-dat[dat$data<bins[i+1] & dat$data>bins[i],]
-    #print(dim(dat.b))
-    # if not data exist in given bin, return 0
-    if(dim(dat.b)[1]==0){
-      dat.b<-data.frame(data=NA, index=NA, bin=bins[i+1])
-      out[[i]]<-dat.b
-    } else {
-      dat.b$bin<-rep(bins[i+1], dim(dat.b)[1])
-      out[[i]]<-dat.b
-    }
-  }
-  out<-do.call("rbind", out)
-  out<-out[order(out$index),]
-  out<-dplyr::select(out, data, bin)
-  out<-na.omit(out)
-  out
-}
-
-# auxiliary function to calculate mean speeds based on daily mean positions and times
-
-speed_func<-function(dat, vmax=2.778){
-  # calculate speed between known geographic coordinates and times
-  dat<-na.omit(dat) # exclude data for which position or time is not known
-  xy<-dplyr::select(dat, lon, lat)
-  tdat<-dplyr::select(dat, date)
-  nx<-length(tdat$date)
-  dist<-na.omit(geosphere::distGeo(xy))
-  bear<-na.omit(geosphere::bearing(xy))
-  tdiff<-as.numeric(difftime(tdat$date[-1], tdat$date[-nx], units="secs"))
-  spd<-as.numeric(na.omit(dist)/tdiff)
-  out<-data.frame(date=dat$date[-nx], spp=dat$spp[-nx], lon=xy$lon[-nx], lat=xy$lat[-nx], dist=dist, time=tdiff, bear=bear, speed=spd)
-  out<-out[out$speed<=vmax,]
-  out
-}
-
-# main plot function that runs above auxiliary functions
-
+```{r Figure 3}
 plot_figure_3<-function(){
-  # to ensure st_crop function works as intended, implement the line below for now (github.com advice 10/3/2022)
+  # set spherical geomoetry to false 
   sf_use_s2(FALSE)
-  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  # Import and housekeeping
-  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- 
+  
   # set data directories for tracks and environmental layers for final plot
   my_wd<-getwd()
   tracks<-paste(my_wd, "/data/tracks/tracks3.csv", sep="")
   track_sum<-paste(my_wd, "/data/tracks/tagstats3.csv", sep="")
   
-  # read in the data, created and exported from the compile_data script
-  
-  dat <- read.csv(tracks)
-  dat<-dat[,-1] #exclude first column
-  
-  #print(length(unique(dat$id)))
+  # read in data set
+  tt<-read.csv(tracks)
+  tt<-tt[,-1]
+  #print(length(unique(tt$id)))
   tt_sum<-read.csv(track_sum)
-  tt_sum<-tt_sum[,-1] # exclude first column
-  
   bloom_deps<-tt_sum$id[tt_sum$RB2==1]
-  dat<-dat[dat$id%in%bloom_deps,]
+  tt<-tt[tt$id%in%bloom_deps,]
   
-  # subset for months April and beyond
-  dat<-dat[dat$month>3,]
+  #print(summary(tt))
+    # subset for months April and beyond
+  #tt<-tt[tt$month>3,]
 
-  dat$date<-as.POSIXct(strptime(dat$date, format="%Y-%m-%d %H:%M:%S", tz="GMT"))
-  names(dat)[2]<-"lon"
-  names(dat)[3]<-"lat"
-  names(dat)[4]<-"lc"
- 
-  # summarize the data to daily averages
-  zdat<-
-    dat %>% 
+  tt$date<-as.POSIXct(strptime(tt$date, format="%Y-%m-%d %H:%M:%S", tz="GMT"))
+  names(tt)[2]<-"lon"
+  names(tt)[3]<-"lat"
+  names(tt)[4]<-"lc"
+  
+  # standardize to daily mean position with 'sumarize_by_day' function
+ zdat<-
+    tt %>% 
     dplyr::mutate(id2=id)%>%
-    dplyr::mutate(lon360=ifelse(dat$lon>0, dat$lon-360, dat$lon))%>%
+    dplyr::mutate(lon360=ifelse(tt$lon>0, tt$lon-360, tt$lon))%>%
     dplyr::group_by(id) %>%
     dplyr::arrange(date, .by_group=TRUE) %>% 
     tidyr::nest() %>%
@@ -146,60 +96,317 @@ plot_figure_3<-function(){
   
   zdat$date<-as.POSIXct(strptime(zdat$date, format="%Y-%m-%d %H:%M:%S"))
   zdat<-zdat[order(zdat$id, zdat$date),]
-  
-  zdf<-dplyr::select(zdat, id, date, lc, lon, lat, spp)
-  zdf<-zdf[order(zdf$id, zdf$date),]
-  
-  # to avoid errors in speed estimation, ensure all longitude in > - 180
-  shift<-38
-  zdf$lon<-zdf$lon+shift
-  
-  # estimate mean speeds withthe bespoke speed_func function
-  zspd <-
-    zdf %>% 
-    dplyr::group_by(id) %>%
-    dplyr::arrange(date, .by_group=TRUE) %>% 
-    tidyr::nest() %>%
-    dplyr::mutate(data=purrr::map(data,speed_func))%>%
-    tidyr::unnest(cols=c(data))
-  
-  # shift the longitude back for proper plotting
-  zspd$lon<-zspd$lon-shift
-  
-  # add longitudinal binning to the data
-  zspd_bin<-bin_func(zspd$lon, 5)
-  
-  zspd$bin<-as.factor(zspd_bin$bin)
-  
-  sf_zspd<-st_as_sf(zspd, coords=c("lon", "lat"))%>%
-    st_set_crs(4326)%>%
-    st_transform(3031)
-  
-  sf_zspd$month<-lubridate::month(sf_zspd$date)
-  
-  # split out each spp for plotting
-  ch_sf_zspd<-sf_zspd[sf_zspd$spp=="CHPE",]
-  es_sf_zspd<-sf_zspd[sf_zspd$spp=="SES",]
-  
-    # create boxplot of speeds by longitudinal bin
-  p3<-ggplot(zspd)+
-    scale_fill_manual(values=c("#d95f02","#7570b3"), name="Species", labels=c("Chinstrap", "Elephant seal"))+
-    geom_boxplot(aes(x=bin, y=speed, fill=spp),outlier.shape=NA)+
-    coord_cartesian(ylim = quantile(zspd$speed, c(0.1, 0.9)))+
-    scale_y_continuous(limits = quantile(zspd$speed, c(0.1, 0.9)))+
-    scale_x_discrete(name="Longitude", breaks=seq(from=-220, by=20, to=-60), 
-                     labels=c("-220","-200","-180","-160","-140","-120","-100","-80","-60"))+
-    ylab("Speed (m/s)")+
-    theme_bw()  
 
-  windows()
-  plot(p3)
-  savePlot(filename="Figure_3.pdf", type="pdf")
+  tt<-zdat
+  tt<-dplyr::select(tt, id, date, lc, lon, lat, spp, month)
+  tt<-tt[order(tt$id, tt$date),]
+  #write.csv(tt, "standardized.csv")
+
+  # interpolate daily tracks so every day of record has an estimated location
+  out<-list()
+  trackids<-unique(tt$id)
+  ntracks<-length(trackids)
+  for(i in 1:ntracks){
+    dep<-trackids[i]
+    trdat<-tt[tt$id==dep,]
+    BURST<-dep
+    ID<-dep
+    # remove unnecessary columns from analysis
+    #trdat<-data.frame(Date=trdat$Date, Long=trdat$Long, Lat=trdat$Lat, Acc=trdat$Acc)
+    # ensure no NA data exist in the needed components
+    #trdat<-na.omit(trdat)
+    # check for duplicated time stames and remove if found
+    dup<-duplicated(trdat$date)
+    if(any(dup)){
+      print("duplicate date/time stamps found. deleting")
+      trdat<-trdat[!dup,]# remove any duplicated rows
+    }
+    # check to make sure the trip has data
+    if(dim(trdat)[1]>1){
+      XY<-data.frame(x=trdat$lon, y=trdat$lat)
+      DATE<-trdat$date
+      #print(str(DATE))
+      INFOLOCS<-data.frame(Acc=trdat$lc)
+      # now pass these to as.ltraj
+      ldat<-as.ltraj(xy=XY, date=DATE, id=ID, infolocs=INFOLOCS, typeII=TRUE, burst=BURST)
+      # now redistribute locations at a fixed interval
+      ldat<-redisltraj(ldat, u=86400, type="time")
+      # at this point, we have a track, interpolated on a regular time interval of one day. 
+      #write.csv(ldat[[1]], "ldat.csv")
+      #reformat output to be similar to input for merging original locations back in
+      ttt<-data.frame(id=rep(dep, length(ldat[[1]]$x)), 
+                      date=ldat[[1]]$date,
+                      lc=rep(NA, length(ldat[[1]]$x)),
+                      lon=ldat[[1]]$x,
+                      lat=ldat[[1]]$y,
+                      spp=rep(unique(trdat$spp), length(ldat[[1]]$x)))
+      ttt$month<-lubridate::month(ttt$date)
+      ttt$raw<-FALSE
+      trdat$raw<-TRUE
+      
+      ttt<-merge(ttt, trdat, all=TRUE)
+      ttt<-ttt[order(ttt$date),]
+      out[[i]]<-ttt
+      
+    } else {
+      MSG1<-paste("Insufficient data identified for deployment ", dep, " trip ", i, 
+                  ". Processing skipped for this record.", sep="")
+      print(MSG1)
+    }
+  }
+  tt<-do.call("rbind", out)
+  
+  # for paper, only use estimated daily positions. 
+  tt<-tt[tt$raw==FALSE,]
+
+  ice_layer<-paste(my_wd, "/data/ice", sep="")
+  mask_layer<-paste(my_wd, "/data/coastline/", sep="")
+  bathy_layer<-paste(my_wd, "/data/bathymetry/ETOPO2v2c_f4.nc", sep="")
+  
+  # create sf geometries
+  tt<-sf::st_as_sf(tt, coords=c("lon", "lat"))%>%
+    sf::st_set_crs(4326)%>%
+    sf::st_transform(3031)
+
+  # now bring in additional layers for plotting
+  ant<-sf::st_read(dsn=mask_layer, layer="GSHHS_h_L5")%>%
+    sf::st_set_crs(4326)%>%
+    #sf::st_crop(., y=c(xmin=-270, ymin=-90, xmax=0 ,ymax=-60))%>%
+    sf::st_transform(3031)
+  
+  isl<-sf::st_read(dsn=mask_layer, layer="GSHHS_h_L1")%>%
+    sf::st_set_crs(4326)%>%
+    sf::st_crop(y=c(xmin=-180, xmax=180, ymin=-90, ymax=-45))%>%
+    sf::st_transform(3031)
+  
+  sf_orsi<- sf::st_as_sf(orsifronts, coords=c("x","y"))%>%
+    sf::st_set_crs(4326)%>%
+    sf::st_crop(orsi, y=c(xmin=-180, ymin=-90, xmax=180 ,ymax=-45))%>%
+    sf::st_transform(3031)
+  
+  #saf<-sf_orsi[sf_orsi$front=="saf",]
+  pf<-sf_orsi[sf_orsi$front=="pf",]
+  sbdy<-sf_orsi[sf_orsi$front=="sbdy",]
+  
+  # bring in the ice layer
+  ice<-sf::st_read(dsn=ice_layer,
+                   layer="extent_S_201706_polygon_v3.0")%>%
+    sf::st_crop(., y=c(xmin=-1e+07, ymin=-3e+06, xmax=1e+07 ,ymax=3.5e+06))
+  
+  bathy<-raster(bathy_layer)
+  bathy<-crop(bathy, extent(-180, 180, -90, -45))
+  bdepth<-as.matrix(bathy)
+  bdepth<-ifelse(bdepth>0, NA, bdepth)
+  bdepth<-raster(bdepth)
+  extent(bdepth)<-extent(bathy)
+  bathy<-bdepth
+  rm(bdepth)
+  crs(bathy)<-"+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"
+  xproj<-sf::st_crs(ant)
+  bathy<-projectRaster(bathy, crs=xproj[[2]])
+  
+  COLS<-c("#542788","#313695","#4575b4","#c51b7d",
+          "#de77ae","#f1b6da","#fee090","#fdae61","#f46d43",
+          "#d73027")
+  
+  CEX<-0.5
+  mons<-c(2,3,4,9,10,11,5,6,7,8)
+  SPP<-unique(tt$spp)
+  for(i in 1:2){
+    #
+    panels<-c("a","b")
+    fileName<-paste("Figure_2", panels[i], ".eps", sep="")
+    
+    #windows()
+    bathycols<-colorRampPalette(c("gray10", "gray90"))
+    plot(pf$geometry, axes=FALSE, col=1, xlim=c(-5e+06, 5e+06), ylim=c(-5.1e+06, 5e+06))
+    plot(bathy, col=bathycols(16),smallplot=c(0.8,0.825, 0.55,0.8), legend.line=4,
+         legend.lab="Depth (m)", add=TRUE)
+    #
+    longs<-seq(from=-180, by=1, to=180)
+    lats<-seq(from=-80, by=5, to=-45)
+    nlongs<-length(longs)
+    nlats<-length(lats)
+    # plot lines of latitude first
+    for(j in 1:nlats){
+      x<-longs
+      y<-rep(lats[j], length=nlongs)
+      xy<-data.frame(x=x,y=y)
+      xy <- sf::st_as_sf(xy, coords = c("x","y"))
+      xy<-sf::st_set_crs(xy, 4326)
+      xy<-sf::st_transform(xy, 3031)
+      nc<-round(length(xy$geometry)/2,0)
+      text.xy<-sf::st_coordinates(xy)[nc,]
+      text(x=text.xy[1]+250000, y=text.xy[2], labels=lats[j], cex=0.66)
+      plot(xy$geometry, type="l", lty=1, lwd=0.25, col="gray", add=TRUE)
+    }
+    
+    longs<-seq(from=-180, by=20, to=160)
+    lats<-seq(from=-80, by=5, to=-45)
+    nlongs<-length(longs)
+    nlats<-length(lats)
+    
+    #now plot lines of longitude and add text to indicate which
+    for(k in 1:nlongs){
+      y<-lats
+      x<-rep(longs[k], length=nlats)
+      xy<-data.frame(x=x,y=y)
+      xy<- sf::st_as_sf(xy, coords = c("x","y"))
+      xy<-sf::st_set_crs(xy, 4326)
+      xy<-sf::st_transform(xy, 3031)
+      plot(xy$geometry, type="l", lty=1, lwd=0.25, col="gray", add=TRUE)
+      #nc<-length(xy$geometry)
+      text.xy<-data.frame(x=longs[k], y=max(lats)+2.5)%>%
+        st_as_sf(coords=c("x","y"))%>%
+        st_set_crs(4326)%>%
+        st_transform(3031)
+      text.xy<-sf::st_coordinates(text.xy)
+      text(x=text.xy[1], y=text.xy[2], labels=longs[k], cex=0.66, srt=-longs[k])
+    }
+    #ice.col<-adjustcolor("grey40", alpha.f=0.5)
+    ice.col<-"#6C8896"
+    plot(ice$geometry, col=ice.col, border=ice.col, add=TRUE)
+    plot(ant$geometry, axes=FALSE, col="#1A1A1A", add=TRUE, lwd=0.1)
+    plot(isl$geometry, axes=FALSE, col="#1A1A1A", add=TRUE, lwd=0.1)
+    mons<-unique(tt$month)
+    nmons<-length(mons)
+  
+    # reorder months for emphasizing mid-winter on top
+    mons<-c(2,3,4,9,10,11,5,6,7,8)
+    CEX<-c(0.5,0.5,0.5,0.5, 0.5,0.5,0.75,0.75,0.75,0.75)
+    
+    COLS<-c("#542788","#313695","#4575b4","#c51b7d",
+            "#de77ae","#f1b6da","#fee090","#fdae61","#f46d43",
+            "#d73027")
+    # plot once for chpe, then for ses
+    tts<-tt[tt$spp==SPP[i],]
+    for(ii in 1:nmons){
+      tt.dat<-tts[tts$month==mons[ii],]
+      ids<-unique(tt.dat$id)
+      nids<-length(ids)
+      for(jj in 1:nids){
+        m.dat<-tt.dat[tt.dat$id==ids[jj],]
+        plot(m.dat$geometry, pch=16, col=COLS[ii], cex=CEX[ii], add=TRUE)
+      }
+    }
+    plot(sbdy$geometry, axes=FALSE, col=1, add=TRUE, lty=1)
+    plot(pf$geometry, axes=FALSE, col=1, add=TRUE, lty=2)
+    
+    legend(x=6500000, y=480000,
+           title="Monthly positions",
+           legend=c("Feb","Mar","Apr","May","Jun","Jul",
+                    "Aug","Sep","Oct","Nov"),
+           pch=16,col=c("#542788","#313695","#4575b4","#fee090","#fdae61","#f46d43",
+                        "#d73027","#c51b7d",
+                        "#de77ae","#f1b6da"),
+           pt.cex=1,
+           bty="n")
+    #savePlot(filename=fileName, type="eps")
+  }
+  #now recreate this with a kernel density estimate for the projected points
+  
+  ttxy<-sf::st_coordinates(tt)
+  tt<-cbind(tt, ttxy)
+  # rename some columns for easier tracking
+  tt<-tt[,-1] # lose first column of index number
+  #remame X.1 to X
+  #names(tt)[7]<-"X"
+  # exclude data before April - only "winter"
+  ttt<-tt[tt$month>3,]
+  # determine apprpriate bandwidth
+  # default is from bandwidth.nrd
+  # bandwidth.nrd(tttt$X) = 173756.5
+  # bandwidth.nrd(tttt$Y) = 1013617
+  # these values produce a more "smudgy" kde picture
+  # an alternative is to use width.SJ
+  # width.SJ(tttt$X) = 35543.45
+  # width.SJ(tttt$Y) = 144544.1 
+  # these values produce a KDE that is to pixelated. 
+  # try tne mean of both
+  h1<-mean(c(width.SJ(ttt$X), bandwidth.nrd(ttt$X)))
+  h2<-mean(c(width.SJ(ttt$Y), bandwidth.nrd(ttt$Y)))
+  
+  ttt.chpe<-ttt[ttt$spp=="CHPE",]
+  ttt.ses<-ttt[ttt$spp=="SES",]
+  f1<-kde2d(x=ttt.chpe$X, y=ttt.chpe$Y, n = 100, h = c(h1, h2))
+  f2<-kde2d(x=ttt.ses$X, y=ttt.ses$Y, n = 100, h = c(h1, h2))
+  kdes<-list(chpe=f1, ses=f2)
+  rm(f1, f2)
+  for(i in 1:2){
+    panels<-c("c","d")
+    fileName<-paste("Figure_2", panels[i], ".eps", sep="")
   #windows()
-}
-```  
+  colx<-colorRampPalette(c("white","#d95f02"))
+  coly<-colorRampPalette(c("lightblue","#7570b3"))
+  coll<-list(colx=colx, coly=coly)
+  bathycols<-colorRampPalette(c("gray10", "gray90"))
+  plot(pf$geometry, axes=FALSE, col=1, xlim=c(-5e+06, 5e+06), ylim=c(-5.1e+06, 5e+06))
+  plot(bathy, col=bathycols(16), add=TRUE, legend=FALSE)
 
-``` {r Run the plot function}
-#
+  longs<-seq(from=-180, by=1, to=180)
+  lats<-seq(from=-80, by=5, to=-45)
+  nlongs<-length(longs)
+  nlats<-length(lats)
+  
+  # plot custom lines of latitude first
+  for(j in 1:nlats){
+    x<-longs
+    y<-rep(lats[j], length=nlongs)
+    xy<-data.frame(x=x,y=y)
+    xy<- sf::st_as_sf(xy, coords = c("x","y"))
+    xy<-sf::st_set_crs(xy, 4326) 
+    xy<-sf::st_transform(xy, 3031)
+    nc<-round(length(xy$geometry)/2,0)
+    text.xy<-sf::st_coordinates(xy)[nc,]
+    text(x=text.xy[1]+250000, y=text.xy[2], labels=lats[j], cex=0.66)
+    plot(xy$geometry, type="l", lty=1, lwd=0.25, col="gray", add=TRUE)
+  }
+  
+  longs<-seq(from=-180, by=20, to=160)
+  lats<-seq(from=-80, by=5, to=-45)
+  nlongs<-length(longs)
+  nlats<-length(lats)
+  
+  #now plot custom lines of longitude and add text to ID
+  for(k in 1:nlongs){
+    y<-lats
+    x<-rep(longs[k], length=nlats)
+    xy<-data.frame(x=x,y=y)
+    xy <- sf::st_as_sf(xy, coords = c("x","y"))
+    xy<-sf::st_set_crs(xy, 4326) 
+    xy<-sf::st_transform(xy, 3031)
+    plot(xy$geometry, type="l", lty=1, lwd=0.25, col="gray", add=TRUE)
+    #nc<-length(xy$geometry)
+    text.xy<-data.frame(x=longs[k], y=max(lats)+2.5)%>%
+      st_as_sf(coords=c("x","y"))%>%
+      st_set_crs(4326)%>%
+      st_transform(3031)
+    text.xy<-sf::st_coordinates(text.xy)
+    text(x=text.xy[1], y=text.xy[2], labels=longs[k], cex=0.66, srt=-longs[k])
+  }
+  ice.col<-"#6C8896"
+  plot(ice$geometry, col=ice.col, border=ice.col, add=TRUE)
+  plot(ant$geometry, col="#1A1A1A", add=TRUE)
+  plot(isl$geometry, col="#1A1A1A", add=TRUE)
+  
+  # set fully transparent white for 0-value kde estimates?
+  f1<-kdes[[i]]
+  COL<-coll[[i]]
+  imagePlot(f1, col=c("#FFFFFF00", COL(12)[2:12]), legend.line=4, 
+            smallplot=c(0.8,0.825, 0.55,0.8), legend.lab="Density", add=TRUE)
+  # imagePlot(f2, col=c("#FFFFFF00", coly(12)[2:12]), legend.line=4, 
+  #           smallplot=c(0.8,0.825, 0.25,0.5), legend.lab="Density", add=TRUE)
+ 
+  plot(sbdy$geometry, lty=1, add=TRUE)
+  plot(pf$geometry, lty=2,  add=TRUE)
+  #savePlot(filename=fileName, type="eps")
+  }
+  #windows()
+  #
+  #return(kdes)
+}
+```
+
+``` {r Run the function}
 plot_figure_3()
 ```

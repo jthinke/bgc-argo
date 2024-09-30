@@ -1,0 +1,205 @@
+---
+title: "Figure 4"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+This is code that defines and runs a function to plot Figure 2. 
+```{r install libraries}
+# Function to check if pkgs are installed, and install any missing pkgs
+
+pkgTest <- function(x)
+{
+  if (!require(x,character.only = TRUE))
+  {
+    install.packages(x,dep=TRUE,repos='http://cran.us.r-project.org')
+    if(!require(x,character.only = TRUE)) stop(x, " :Package not found")
+  }
+}
+
+# create list of required packages
+list.of.packages <- c("sf", "dplyr", "tidyr", "ggplot2", "lubridate", "geosphere") 
+                      
+# create list of installed packages
+pkges = installed.packages()[,"Package"]
+
+# Install and load all required pkgs
+for (pk in list.of.packages) {
+  pkgTest(pk)
+}
+
+```
+
+```{r Define necesssary functions}
+
+# auxiliary function to compute daily average position and time of locatoin estimates
+
+summarize_by_day<-function(x){
+  x$day<-lubridate::yday(x$date)
+  mlon<-tapply(x$lon360, x$day, mean)
+  mlat<-tapply(x$lat, x$day, mean)
+  mdate<-tapply(x$date, x$day, mean.Date)
+  mdate<-as.POSIXct(as.Date(mdate/(60*60*24), origin="1970-1-1"))
+  nx<-length(mdate)
+  out<-data.frame(lon=mlon, lat=mlat, lc=rep(1,nx), 
+                  date=mdate, spp=rep(x$spp[1], nx), site=rep(x$site[1],nx))
+  out$date<-as.character(out$date)
+  out$day<-lubridate::yday(out$date)
+  out
+}
+
+# auxiliary function to bin data by longitude
+
+bin_func<-function(data,  bin_size){
+  # bin a vector
+  dat<-data.frame(data=data)
+  dat.r<-range(pretty(range(dat$data), n=10))
+  bins<-seq(from=dat.r[1], by=bin_size, to=dat.r[2])
+  n.bins<-length(bins)-1
+  dat$index<-1:length(dat$data)
+  out<-list()
+  for(i in 1:n.bins){
+    #print(i)
+    dat.b<-dat[dat$data<bins[i+1] & dat$data>bins[i],]
+    #print(dim(dat.b))
+    # if not data exist in given bin, return 0
+    if(dim(dat.b)[1]==0){
+      dat.b<-data.frame(data=NA, index=NA, bin=bins[i+1])
+      out[[i]]<-dat.b
+    } else {
+      dat.b$bin<-rep(bins[i+1], dim(dat.b)[1])
+      out[[i]]<-dat.b
+    }
+  }
+  out<-do.call("rbind", out)
+  out<-out[order(out$index),]
+  out<-dplyr::select(out, data, bin)
+  out<-na.omit(out)
+  out
+}
+
+# auxiliary function to calculate mean speeds based on daily mean positions and times
+
+speed_func<-function(dat, vmax=2.778){
+  # calculate speed between known geographic coordinates and times
+  dat<-na.omit(dat) # exclude data for which position or time is not known
+  xy<-dplyr::select(dat, lon, lat)
+  tdat<-dplyr::select(dat, date)
+  nx<-length(tdat$date)
+  dist<-na.omit(geosphere::distGeo(xy))
+  bear<-na.omit(geosphere::bearing(xy))
+  tdiff<-as.numeric(difftime(tdat$date[-1], tdat$date[-nx], units="secs"))
+  spd<-as.numeric(na.omit(dist)/tdiff)
+  out<-data.frame(date=dat$date[-nx], spp=dat$spp[-nx], lon=xy$lon[-nx], lat=xy$lat[-nx], dist=dist, time=tdiff, bear=bear, speed=spd)
+  out<-out[out$speed<=vmax,]
+  out
+}
+
+# main plot function that runs above auxiliary functions
+
+plot_figure_4<-function(){
+  # to ensure st_crop function works as intended, implement the line below for now (github.com advice 10/3/2022)
+  sf_use_s2(FALSE)
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  # Import and housekeeping
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+  # set data directories for tracks and environmental layers for final plot
+  my_wd<-getwd()
+  tracks<-paste(my_wd, "/data/tracks/tracks3.csv", sep="")
+  track_sum<-paste(my_wd, "/data/tracks/tagstats3.csv", sep="")
+  
+  # read in the data, created and exported from the compile_data script
+  
+  dat <- read.csv(tracks)
+  dat<-dat[,-1] #exclude first column
+  
+  #print(length(unique(dat$id)))
+  tt_sum<-read.csv(track_sum)
+  tt_sum<-tt_sum[,-1] # exclude first column
+  
+  bloom_deps<-tt_sum$id[tt_sum$RB2==1]
+  dat<-dat[dat$id%in%bloom_deps,]
+  
+  # subset for months April and beyond
+  dat<-dat[dat$month>3,]
+
+  dat$date<-as.POSIXct(strptime(dat$date, format="%Y-%m-%d %H:%M:%S", tz="GMT"))
+  names(dat)[2]<-"lon"
+  names(dat)[3]<-"lat"
+  names(dat)[4]<-"lc"
+ 
+  # summarize the data to daily averages
+  zdat<-
+    dat %>% 
+    dplyr::mutate(id2=id)%>%
+    dplyr::mutate(lon360=ifelse(dat$lon>0, dat$lon-360, dat$lon))%>%
+    dplyr::group_by(id) %>%
+    dplyr::arrange(date, .by_group=TRUE) %>% 
+    tidyr::nest() %>%
+    dplyr::mutate(data=purrr::map(data,summarize_by_day))%>%
+    tidyr::unnest(cols=c(data))
+  
+  zdat$date<-as.POSIXct(strptime(zdat$date, format="%Y-%m-%d %H:%M:%S"))
+  zdat<-zdat[order(zdat$id, zdat$date),]
+  
+  zdf<-dplyr::select(zdat, id, date, lc, lon, lat, spp)
+  zdf<-zdf[order(zdf$id, zdf$date),]
+  
+  # to avoid errors in speed estimation, ensure all longitude in > - 180
+  shift<-38
+  zdf$lon<-zdf$lon+shift
+  
+  # estimate mean speeds withthe bespoke speed_func function
+  zspd <-
+    zdf %>% 
+    dplyr::group_by(id) %>%
+    dplyr::arrange(date, .by_group=TRUE) %>% 
+    tidyr::nest() %>%
+    dplyr::mutate(data=purrr::map(data,speed_func))%>%
+    tidyr::unnest(cols=c(data))
+  
+  # shift the longitude back for proper plotting
+  zspd$lon<-zspd$lon-shift
+  
+  # add longitudinal binning to the data
+  zspd_bin<-bin_func(zspd$lon, 5)
+  
+  zspd$bin<-as.factor(zspd_bin$bin)
+  
+  sf_zspd<-st_as_sf(zspd, coords=c("lon", "lat"))%>%
+    st_set_crs(4326)%>%
+    st_transform(3031)
+  
+  sf_zspd$month<-lubridate::month(sf_zspd$date)
+  
+  # split out each spp for plotting
+  ch_sf_zspd<-sf_zspd[sf_zspd$spp=="CHPE",]
+  es_sf_zspd<-sf_zspd[sf_zspd$spp=="SES",]
+  
+    # create boxplot of speeds by longitudinal bin
+  p3<-ggplot(zspd)+
+    scale_fill_manual(values=c("#d95f02","#7570b3"), name="Species", labels=c("Chinstrap", "Elephant seal"))+
+    geom_boxplot(aes(x=bin, y=speed, fill=spp),outlier.shape=NA)+
+    coord_cartesian(ylim = quantile(zspd$speed, c(0.1, 0.9)))+
+    scale_y_continuous(limits = quantile(zspd$speed, c(0.1, 0.9)))+
+    scale_x_discrete(name="Longitude", breaks=seq(from=-220, by=20, to=-60), 
+                     labels=c("-220","-200","-180","-160","-140","-120","-100","-80","-60"))+
+    ylab("Speed (m/s)")+
+    theme_bw()  
+
+  windows()
+  plot(p3)
+  savePlot(filename="Figure_4.pdf", type="pdf")
+  #windows()
+}
+```  
+
+``` {r Run the plot function}
+#
+plot_figure_4()
+```

@@ -1,6 +1,8 @@
 ---
 title: "Data, Figure 1, and auxiliary plots"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 Calculate the tag stats for each tag. Do it on the full meop dataset. For each tag calculate determine the origin, and then the distance traveled from the origin at each point. Then for each tag calculate the mean and maximum distance traveled, and look at the stats on a tag basis.
@@ -300,9 +302,9 @@ p3 <- ggplot(subset(TagStats,spp=="SES"), aes(x=maxdist)) +
 ```
 
 
-```{r Plot Figure 1}
+```{r Plot Figure 2}
 
-filename <- (here('Figure_1.pdf'))
+filename <- (here('Figure_2.pdf'))
 
 temp <- subset(TagStats3,spp=="CHPE")
 rb <- subset(temp, (RB >0 & maxdist > 1)) 

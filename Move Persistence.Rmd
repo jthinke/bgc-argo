@@ -133,26 +133,6 @@ plot_figure_4<-function(){
   names(dat)[3]<-"lat"
   names(dat)[4]<-"lc"
   
-  # summarize the data to daily averages
-  zdat<-
-    dat %>% 
-    dplyr::mutate(id2=id)%>%
-    dplyr::mutate(lon360=ifelse(dat$lon>0, dat$lon-360, dat$lon))%>%
-    dplyr::group_by(id) %>%
-    dplyr::arrange(date, .by_group=TRUE) %>% 
-    tidyr::nest() %>%
-    dplyr::mutate(data=purrr::map(data,summarize_by_day))%>%
-    tidyr::unnest(cols=c(data))
-  
-  zdat$date<-as.POSIXct(strptime(zdat$date, format="%Y-%m-%d %H:%M:%S"))
-  zdat<-zdat[order(zdat$id, zdat$date),]
-  
-  zdf<-dplyr::select(zdat, id, date, lc, lon, lat, spp)
-  zdf<-zdf[order(zdf$id, zdf$date),]
-  
-  # to avoid errors in speed estimation, ensure all longitude in > - 180
-  shift<-38
-  zdf$lon<-zdf$lon+shift
   
   ##
   #-----------------------------------------------------------------------------------
@@ -165,7 +145,7 @@ plot_figure_4<-function(){
   # Data must be in a specific order (of columns) and have specific names for foieGras to work
   # rename to df to maintain the original, and select columns needed
   
-  df = dplyr::select(dat, id, date, lq, lon, lat)
+  df <- dplyr::select(dat, id, date, lc, lon, lat)
   names(df) <- c("id", "date", "lc", "lon", "lat")
   head(df)
   
@@ -177,17 +157,17 @@ plot_figure_4<-function(){
   # vmax also works at 5 (which is too much, but fails at 2.5, 3 and 4 in the fit_mpm step)
   
   fit <- fit_ssm(df,
-                 vmax = 2.77778,   # max travel rate (m/s) = 10 km /h
-                 min.dt = 30,      # minimum allowable time difference between observations (in minutes)
+                 vmax = 5,   # max travel rate (m/s) = 10 km /h
+                 min.dt = 60,      # minimum allowable time difference between observations (in minutes)
                  model = "rw", 
-                 time.step = 2,   # the regular time interval, in hours to predict to
-                 verbose = 1)     
+                 time.step = 24)   # the regular time interval, in hours to predict to
+                 #verbose = 1)     
   
   #saveRDS(fit, "./output/fit_fit_smm_NB.RDS")
   #fit = readRDS("./output/fit_fit_smm_NB.RDS")
   
   fit$ssm[[1]]
-  print(fit, n = 30)
+  print(fit, n = 1440)
   fg.fitted = grab(fit, what = "fitted", as_sf = F)
   fg.predicted  = grab(fit, what = "predicted", as_sf = F)
   
@@ -201,17 +181,17 @@ plot_figure_4<-function(){
   FG.sf_locs <- sf::st_as_sf(FG.dat, coords = c("lon","lat")) %>% 
     sf::st_set_crs(prj)
   
-  fig.FG.argos = ggplot() + 
-    # annotation_map_tile(type = esri_ocean,zoomin = 1,progress = "none") +            if downloading# 
-    #annotation_map_tile(zoom = 1, cachedir = system.file("rosm.cache", package = "ggspatial")) +  # if using downloaded files
-    layer_spatial(FG.sf_locs, size = 0.75, alpha = 0.1, aes()) +  # specified stage as ID above
-    scale_x_continuous(expand = expand_scale(mult = c(.6, .6))) +
-    scale_color_brewer(palette = "Dark2") +
-    theme(legend.position = "none") +
-    ggtitle("Nonbreeding Adelie penguins from King George Island (2016)", 
-            subtitle = "All tracks (n = 30)(FoieGras filtered)")
-  
-  fig.FG.argos
+  # fig.FG.argos = ggplot() + 
+  #   # annotation_map_tile(type = esri_ocean,zoomin = 1,progress = "none") +            if downloading# 
+  #   #annotation_map_tile(zoom = 1, cachedir = system.file("rosm.cache", package = "ggspatial")) +  # if using downloaded files
+  #   geom_sf(FG.sf_locs, aes(size = 0.75, alpha = 0.1)) +  # specified stage as ID above
+  #   scale_x_continuous(expand = expand_scale(mult = c(.6, .6))) +
+  #   scale_color_brewer(palette = "Dark2") +
+  #   theme(legend.position = "none") +
+  #   ggtitle("Nonbreeding Adelie penguins from King George Island (2016)", 
+  #           subtitle = "All tracks (n = 30)(FoieGras filtered)")
+  # 
+  # fig.FG.argos
   
   # Save png to disk
   #ggsave("./plots/fig2_foieGras_argos_points.png", width = 5, height = 5, dpi = 400)
@@ -220,8 +200,8 @@ plot_figure_4<-function(){
   # plot time-series of the predicted values. 
   #------------------------------------------------------------------
   
-  plot(fit, what = "predicted", type = 1, pages = 0)
-  plot(fit, what = "fitted", type = 2, pages = 0)
+  # plot(fit, what = "predicted", type = 1, pages = 0)
+  # plot(fit, what = "fitted", type = 2, pages = 0)
   
   # png(filename = "./plots/individuals/ID_timeseries_predicted%03d.png", width = 2000, height = 1300, 
   #      pointsize = 8,  res = 300)
@@ -245,7 +225,6 @@ plot_figure_4<-function(){
   
   fmp 
   plot(fmp)
-  
   
   
 }

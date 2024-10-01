@@ -52,7 +52,7 @@ for (pk in list.of.packages) {
 ```
 
 ```{r Get Penguin data}
-# chpe track data inlucde data from Hinke et al. 2017 and 2019, Trivelpiece et al 2007, and unpublished tracks. 
+# chpe track data include data from Hinke et al. 2017 and 2019, Trivelpiece et al 2007, and unpublished tracks. 
 
 tracks <- read.csv(here("data/tracks/chpe_data.csv"))
 tracks$date <- as.POSIXct(tracks$date, format="%m/%d/%Y %H:%M:%S")

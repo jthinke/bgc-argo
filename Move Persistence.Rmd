@@ -19,7 +19,7 @@ pkgTest <- function(x)
 }
 
 # create list of required packages
-list.of.packages <- c("sf", "dplyr", "ggplot2", "lubridate","orsifronts",
+list.of.packages <- c("sf", "dplyr", "ggplot2", "lubridate","orsifronts", "ggOceanMaps",
                       "viridis","ncdf4","raster", "fields","gridExtra",
                       "MASS", "adehabitatLT", "aniMotum") 
 
@@ -97,7 +97,7 @@ speed_func<-function(dat, vmax=2.778){
 ```
 
 
-# main plot function that runs above auxiliary functions
+# main function to tuns above auxiliary functions
 
 ```{r define main analysis function}
 
@@ -136,82 +136,31 @@ plot_figure_4<-function(){
   
   ##
   #-----------------------------------------------------------------------------------
-  # Fit a continuous random walk model for quality control of ARGOS locations
-  # Jonsen et al. Movement Ecology (2020) 8:31
-  # - This speed filters the data
-  # - Change temporally irregular observations into discrete (regular) time-steps
+  # Fit a continuous random walk model
   #--------------------------------------------------------------------------------
   
-  # Data must be in a specific order (of columns) and have specific names for foieGras to work
-  # rename to df to maintain the original, and select columns needed
+  # arrange data to fit needed formating
   
   df <- dplyr::select(dat, id, date, lc, lon, lat)
-  names(df) <- c("id", "date", "lc", "lon", "lat")
-  head(df)
-  
+
+    #------------------------------------------------------------------
+  # fit model using a 1-day step
   #------------------------------------------------------------------
-  # Prefilter and fit Random Walk SSM using a 2 hour time step
-  # simple 'rw' : crw results in false paths
-  # Jonsen also used simple rw for his 2020 SES paper
-  #------------------------------------------------------------------
-  # vmax also works at 5 (which is too much, but fails at 2.5, 3 and 4 in the fit_mpm step)
-  
+
   fit <- fit_ssm(df,
-                 vmax = 5,   # max travel rate (m/s) = 10 km /h
+                 vmax = 3,   
                  min.dt = 60,      # minimum allowable time difference between observations (in minutes)
                  model = "rw", 
                  time.step = 24)   # the regular time interval, in hours to predict to
-                 #verbose = 1)     
   
   #saveRDS(fit, "./output/fit_fit_smm_NB.RDS")
   #fit = readRDS("./output/fit_fit_smm_NB.RDS")
   
   fit$ssm[[1]]
-  print(fit, n = 1440)
-  fg.fitted = grab(fit, what = "fitted", as_sf = F)
-  fg.predicted  = grab(fit, what = "predicted", as_sf = F)
+  fg.fitted = grab(fit, what = "fitted", as_sf = FALSE)
+  fg.predicted  = grab(fit, what = "predicted", as_sf = FALSE)
   
   FG.dat = fg.predicted
-  
-  
-  # Plot predicted values
-  # set a projection 
-  prj = " +proj=longlat + ellps = WGS84 + datum=WGS84"  
-  
-  FG.sf_locs <- sf::st_as_sf(FG.dat, coords = c("lon","lat")) %>% 
-    sf::st_set_crs(prj)
-  
-  # fig.FG.argos = ggplot() + 
-  #   # annotation_map_tile(type = esri_ocean,zoomin = 1,progress = "none") +            if downloading# 
-  #   #annotation_map_tile(zoom = 1, cachedir = system.file("rosm.cache", package = "ggspatial")) +  # if using downloaded files
-  #   geom_sf(FG.sf_locs, aes(size = 0.75, alpha = 0.1)) +  # specified stage as ID above
-  #   scale_x_continuous(expand = expand_scale(mult = c(.6, .6))) +
-  #   scale_color_brewer(palette = "Dark2") +
-  #   theme(legend.position = "none") +
-  #   ggtitle("Nonbreeding Adelie penguins from King George Island (2016)", 
-  #           subtitle = "All tracks (n = 30)(FoieGras filtered)")
-  # 
-  # fig.FG.argos
-  
-  # Save png to disk
-  #ggsave("./plots/fig2_foieGras_argos_points.png", width = 5, height = 5, dpi = 400)
-  
-  #------------------------------------------------------------------
-  # plot time-series of the predicted values. 
-  #------------------------------------------------------------------
-  
-  # plot(fit, what = "predicted", type = 1, pages = 0)
-  # plot(fit, what = "fitted", type = 2, pages = 0)
-  
-  # png(filename = "./plots/individuals/ID_timeseries_predicted%03d.png", width = 2000, height = 1300, 
-  #      pointsize = 8,  res = 300)
-  # plot(fit, what = "predicted", type = 1, pages = 0)
-  # dev.off()
-  # 
-  # png(filename = "./plots/individuals/ID_timeseries_fitted%03d.png", width = 2000, height = 1300, 
-  #     pointsize = 8,  res = 300)
-  # plot(fit, what = "fitted", type = 2, pages = 0)
-  # dev.off()
   
   
   #------------------------------------------------------------------
@@ -221,13 +170,60 @@ plot_figure_4<-function(){
   fmp <- fit %>% 
     grab(what = "predicted", as_sf = FALSE) %>%
     dplyr::select(id, date, lon, lat) %>%
-    fit_mpm(model = "jmpm", verbose = 1, optim = "nlminb") 
+    fit_mpm(model = "jmpm",  ssm_control(optim = "nlminb", verbose=1))
   
-  fmp 
-  plot(fmp)
+  # extract results and merge
+  tt<-fmp[[1]][[1]]$fitted
+  ttpos<-fmp[[1]][[1]]$data
+  tt<-merge(tt, ttpos, by="id")
+  tt$DOY<-lubridate::yday(tt$date.x)
+
+  # create binning category 
+  tt_bin<-bin_func(tt$x, 5)
+  tt$bin<-as.factor(tt_bin$bin)
+  
+  #add speices ID back to tt
+  spp.key<-data.frame(id=unique(tt$id), spp=c(rep("CHPE", 11), rep("SES", 14)))
+  tt<-merge(tt, spp.key, by="id")
   
   
+  tt<-st_as_sf(tt, coords=c("x", "y"))%>%
+    st_set_crs(4326)%>%
+    st_transform(3031)
+
+  mypal <- RColorBrewer::brewer.pal(n = 8, name = "YlGnBu")
+  m1<-basemap(-50)+
+    geom_sf(data=tt, aes(colour=g))+
+    scale_color_gradientn(colours = mypal,limits = c(0,1),oob=scales::squish)
+
+  m1
+  windows()
+  plot(m1)
+  savePlot(filename="Figure_5mp_map.pdf", type="pdf")
+  
+  p3<-ggplot(tt)+
+    scale_fill_manual(values=c("#d95f02","#7570b3"), name="Species", labels=c("Chinstrap", "Elephant seal"))+
+    geom_boxplot(aes(x=bin, y=g, fill=spp),outlier.shape=NA)+
+    coord_cartesian(ylim = quantile(tt$g, c(0, 1)))+
+    scale_y_continuous(limits = quantile(tt$g, c(0, 1)))+
+    scale_x_discrete(name="Longitude", breaks=seq(from=-220, by=20, to=-60), 
+                     labels=c("-220","-200","-180","-160","-140","-120","-100","-80","-60"))+
+    ylab("Move persistance")+
+    theme_bw()  
+  
+  windows()
+  plot(p3)
+  savePlot(filename="Figure_5mpbin.pdf", type="pdf")
+
 }
+
+
+```
+# Run the function
+
+```{r run the function}
+
+plot_figure_4()
 
 
 ```

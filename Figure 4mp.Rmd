@@ -1,0 +1,198 @@
+---
+title: "Figure 4mp"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+```{r install libraries}
+# Function to check if pkgs are installed, and install any missing pkgs
+
+pkgTest <- function(x)
+{
+  if (!require(x,character.only = TRUE))
+  {
+    install.packages(x,dep=TRUE,repos='http://cran.us.r-project.org')
+    if(!require(x,character.only = TRUE)) stop(x, " :Package not found")
+  }
+}
+
+# create list of required packages
+list.of.packages <- c("sf", "dplyr", "ggplot2", "lubridate","orsifronts", "ggOceanMaps",
+                      "viridis","ncdf4","raster", "fields","gridExtra",
+                      "MASS", "adehabitatLT", "aniMotum") 
+
+# create list of installed packages
+pkges = installed.packages()[,"Package"]
+
+# Install and load all required pkgs
+for (pk in list.of.packages) {
+  pkgTest(pk)
+}
+```
+
+```{r define functions}
+# auxiliary function to bin data by longitude
+
+bin_func<-function(data,  bin_size){
+  # bin a vector
+  dat<-data.frame(data=data)
+  dat.r<-range(pretty(range(dat$data), n=10))
+  bins<-seq(from=dat.r[1], by=bin_size, to=dat.r[2])
+  n.bins<-length(bins)-1
+  dat$index<-1:length(dat$data)
+  out<-list()
+  for(i in 1:n.bins){
+    #print(i)
+    dat.b<-dat[dat$data<bins[i+1] & dat$data>bins[i],]
+    #print(dim(dat.b))
+    # if not data exist in given bin, return 0
+    if(dim(dat.b)[1]==0){
+      dat.b<-data.frame(data=NA, index=NA, bin=bins[i+1])
+      out[[i]]<-dat.b
+    } else {
+      dat.b$bin<-rep(bins[i+1], dim(dat.b)[1])
+      out[[i]]<-dat.b
+    }
+  }
+  out<-do.call("rbind", out)
+  out<-out[order(out$index),]
+  out<-dplyr::select(out, data, bin)
+  out<-na.omit(out)
+  out
+}
+```
+# main function to tuns above auxiliary functions
+
+```{r define main analysis function}
+
+plot_figure_4mp<-function(){
+  # to ensure st_crop function works as intended, implement the line below for now (github.com advice 10/3/2022)
+  sf_use_s2(FALSE)
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  # Import and housekeeping
+  #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  
+  # set data directories for tracks and environmental layers for final plot
+  my_wd<-getwd()
+  tracks<-paste(my_wd, "/data/tracks/tracks3.csv", sep="")
+  track_sum<-paste(my_wd, "/data/tracks/tagstats3.csv", sep="")
+  
+  # read in the data, created and exported from the compile_data script
+  
+  dat <- read.csv(tracks)
+  dat<-dat[,-1] #exclude first column
+  
+  #print(length(unique(dat$id)))
+  tt_sum<-read.csv(track_sum)
+  tt_sum<-tt_sum[,-1] # exclude first column
+  
+  bloom_deps<-tt_sum$id[tt_sum$RB2==1]
+  dat<-dat[dat$id%in%bloom_deps,]
+  
+  # subset for months April and beyond
+  dat<-dat[dat$month>3,]
+  
+  dat$date<-as.POSIXct(strptime(dat$date, format="%Y-%m-%d %H:%M:%S", tz="GMT"))
+  names(dat)[2]<-"lon"
+  names(dat)[3]<-"lat"
+  names(dat)[4]<-"lc"
+  
+  
+  ##
+  #-----------------------------------------------------------------------------------
+  # Fit a continuous random walk model
+  #--------------------------------------------------------------------------------
+  
+  # arrange data to fit needed formating
+  
+  df <- dplyr::select(dat, id, date, lc, lon, lat)
+
+    #------------------------------------------------------------------
+  # fit model using a 1-day step
+  #------------------------------------------------------------------
+
+  fit <- fit_ssm(df,
+                 vmax = 4,   
+                 min.dt = 60,      # minimum allowable time difference between observations (in minutes)
+                 model = "rw", 
+                 time.step = 24)   # the regular time interval, in hours to predict to
+  
+  #saveRDS(fit, "./output/fit_fit_smm_NB.RDS")
+  #fit = readRDS("./output/fit_fit_smm_NB.RDS")
+  
+  #fit$ssm[[1]]
+  #fitted = grab(fit, what = "fitted", as_sf = FALSE)
+  predicted  = grab(fit, what = "predicted", as_sf = FALSE)
+  
+  dff<-aggregate(dat$spp, list(id=dat$id), unique)
+  names(dff)[2]<-"spp"
+  
+  tt<-merge(predicted, dff, by="id", all.y=FALSE)
+  
+  
+  #------------------------------------------------------------------
+  # Fit movement persistence model
+  #------------------------------------------------------------------
+  # 
+   fmp <- fit %>% 
+     grab(what = "predicted", as_sf = FALSE) %>%
+     dplyr::select(id, date, lon, lat) %>%
+     fit_mpm(model = "jmpm",  ssm_control(optim = "nlminb", verbose=1))
+  # 
+  # # extract results and merge
+   tt<-fmp[[1]][[1]]$fitted
+   ttpos<-fmp[[1]][[1]]$data
+   tt<-merge(tt, ttpos, by="id")
+   tt$DOY<-lubridate::yday(tt$date.x)
+
+  # create binning category 
+  tt_bin<-bin_func(tt$x, 5)
+  tt$bin<-as.factor(tt_bin$bin)
+  
+  #add speices ID back to tt
+  spp.key<-data.frame(id=unique(tt$id), spp=c(rep("CHPE", 11), rep("SES", 14)))
+  tt<-merge(tt, spp.key, by="id")
+  
+  
+  tt<-st_as_sf(tt, coords=c("x", "y"))%>%
+    st_set_crs(4326)%>%
+    st_transform(3031)
+
+  mypal <- RColorBrewer::brewer.pal(n = 8, name = "YlGnBu")
+  m1<-basemap(-50)+
+    geom_sf(data=tt, aes(colour=g))+
+    scale_color_gradientn(colours = mypal,limits = c(0,1),oob=scales::squish)
+
+  m1
+  windows()
+  plot(m1)
+  savePlot(filename="Figure_5mp_map.pdf", type="pdf")
+  
+  p3<-ggplot(tt)+
+    scale_fill_manual(values=c("#d95f02","#7570b3"), name="Species", labels=c("Chinstrap", "Elephant seal"))+
+    geom_boxplot(aes(x=bin, y=g, fill=spp),outlier.shape=NA)+
+    coord_cartesian(ylim = quantile(tt$g, c(0, 1)))+
+    scale_y_continuous(limits = quantile(tt$g, c(0, 1)))+
+    scale_x_discrete(name="Longitude", breaks=seq(from=-220, by=20, to=-60), 
+                     labels=c("-220","-200","-180","-160","-140","-120","-100","-80","-60"))+
+    ylab("Move persistance")+
+    theme_bw()  
+  
+  windows()
+  plot(p3)
+  savePlot(filename="Figure_5mpbin.pdf", type="pdf")
+
+}
+
+
+```
+# Run the function
+
+```{r run the function}
+
+plot_figure_4mp()
+
+
+```

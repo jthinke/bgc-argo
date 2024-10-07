@@ -8,7 +8,7 @@ knitr::opts_chunk$set(echo = FALSE)
 ```
 
 
-This is code that defines and runs a function to plot Figure 2. 
+This is code that defines and runs a function to plot Figure 4. 
 ```{r install libraries}
 # Function to check if pkgs are installed, and install any missing pkgs
 
@@ -154,7 +154,7 @@ plot_figure_4<-function(){
   shift<-38
   zdf$lon<-zdf$lon+shift
   
-  # estimate mean speeds withthe bespoke speed_func function
+  # estimate mean speeds with the bespoke speed_func function
   zspd <-
     zdf %>% 
     dplyr::group_by(id) %>%
@@ -194,7 +194,7 @@ plot_figure_4<-function(){
 
   windows()
   plot(p3)
-  savePlot(filename="Figure_4.pdf", type="pdf")
+  savePlot(filename="Figure_4orig.pdf", type="pdf")
   #windows()
 }
 ```  

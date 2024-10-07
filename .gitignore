@@ -6,3 +6,6 @@ data/
 plots/
 *.html
 *.pdf
+*.ai
+*.eps
+*.csv

@@ -62,6 +62,23 @@ bin_func<-function(data,  bin_size){
   out<-na.omit(out)
   out
 }
+
+speed_func<-function(dat, vmax=4){
+  # calculate speed between known geographic coordinates and times
+  dat<-na.omit(dat) # exclude data for which position or time is not known
+  xy<-dplyr::select(dat, lon360, lat)
+  tdat<-dplyr::select(dat, date)
+  nx<-length(tdat$date)
+  dist<-na.omit(geosphere::distGeo(xy))
+  bear<-na.omit(geosphere::bearing(xy))
+  tdiff<-as.numeric(difftime(tdat$date[-1], tdat$date[-nx], units="secs"))
+  spd<-as.numeric(na.omit(dist)/tdiff)
+  out<-data.frame(date=dat$date[-nx], spp=dat$spp[-nx], lon=xy$lon360[-nx], 
+                  lat=xy$lat[-nx], dist=dist, time=tdiff, bear=bear, 
+                  speed=spd)
+  out<-out[out$speed<=vmax,]
+  out
+}
 ```
 # main function to tuns above auxiliary functions
 
@@ -98,8 +115,6 @@ plot_figure_4mp<-function(){
   names(dat)[2]<-"lon"
   names(dat)[3]<-"lat"
   names(dat)[4]<-"lc"
-  
-  
   ##
   #-----------------------------------------------------------------------------------
   # Fit a continuous random walk model
@@ -130,60 +145,123 @@ plot_figure_4mp<-function(){
   names(dff)[2]<-"spp"
   
   tt<-merge(predicted, dff, by="id", all.y=FALSE)
+  #
+  zdf<-tt
+  # ensure lon is continuous over -189
+  zdf$lon360<-ifelse(zdf$lon>0, zdf$lon-360, zdf$lon)
+  shift<-25
+  zdf$lon360<-zdf$lon360+shift
+  
+  # estimate mean speeds witht he bespoke speed_func function
+  zspd <-
+    zdf %>% 
+    dplyr::group_by(id) %>%
+    dplyr::arrange(date, .by_group=TRUE) %>% 
+    tidyr::nest() %>%
+    dplyr::mutate(data=purrr::map(data,speed_func))%>%
+    tidyr::unnest(cols=c(data))
+  
+  # shift the longitude back for proper plotting
+  zspd$lon360<-zspd$lon-shift
+  
+  # add longitudinal binning to the data
+  zspd_bin<-bin_func(zspd$lon360, 5)
+  zspd$bin<-as.factor(zspd_bin$bin)
+  
+  # sf_zspd<-st_as_sf(zspd, coords=c("lon", "lat"))%>%
+  #   st_set_crs(4326)%>%
+  #   st_transform(3031)
+  # 
+  # sf_zspd$month<-lubridate::month(sf_zspd$date)
+  # 
+  # # split out each spp for plotting
+  # ch_sf_zspd<-sf_zspd[sf_zspd$spp=="CHPE",]
+  # es_sf_zspd<-sf_zspd[sf_zspd$spp=="SES",]
   
   
   #------------------------------------------------------------------
   # Fit movement persistence model
   #------------------------------------------------------------------
   # 
-   fmp <- fit %>% 
-     grab(what = "predicted", as_sf = FALSE) %>%
-     dplyr::select(id, date, lon, lat) %>%
-     fit_mpm(model = "jmpm",  ssm_control(optim = "nlminb", verbose=1))
+  fmp <- fit %>%
+    grab(what = "predicted", as_sf = FALSE) %>%
+    dplyr::select(id, date, lon, lat) %>%
+    fit_mpm(model = "jmpm",  ssm_control(optim = "nlminb", verbose=1))
+  # # #
+  # # # # extract results and merge
+  tt<-fmp[[1]][[1]]$fitted
+  ttpos<-fmp[[1]][[1]]$data
+  tt<-merge(tt, ttpos, by="id")
+  tt$DOY<-lubridate::yday(tt$date.x)
+  # make longitude continuous (no positive values)
+  tt$x360<-ifelse(tt$x>0,  tt$x-360, tt$x)
   # 
-  # # extract results and merge
-   tt<-fmp[[1]][[1]]$fitted
-   ttpos<-fmp[[1]][[1]]$data
-   tt<-merge(tt, ttpos, by="id")
-   tt$DOY<-lubridate::yday(tt$date.x)
-
-  # create binning category 
-  tt_bin<-bin_func(tt$x, 5)
+  # # create binning category
+  tt_bin<-bin_func(tt$x360, 5)
   tt$bin<-as.factor(tt_bin$bin)
-  
-  #add speices ID back to tt
+  # 
+  # #add speices ID back to tt
   spp.key<-data.frame(id=unique(tt$id), spp=c(rep("CHPE", 11), rep("SES", 14)))
   tt<-merge(tt, spp.key, by="id")
   
-  
+
   tt<-st_as_sf(tt, coords=c("x", "y"))%>%
     st_set_crs(4326)%>%
     st_transform(3031)
-
+  # 
   mypal <- RColorBrewer::brewer.pal(n = 8, name = "YlGnBu")
+
   m1<-basemap(-50)+
     geom_sf(data=tt, aes(colour=g))+
     scale_color_gradientn(colours = mypal,limits = c(0,1),oob=scales::squish)
-
+  # 
   m1
   windows()
   plot(m1)
   savePlot(filename="Figure_5mp_map.pdf", type="pdf")
-  
+  # 
   p3<-ggplot(tt)+
     scale_fill_manual(values=c("#d95f02","#7570b3"), name="Species", labels=c("Chinstrap", "Elephant seal"))+
     geom_boxplot(aes(x=bin, y=g, fill=spp),outlier.shape=NA)+
     coord_cartesian(ylim = quantile(tt$g, c(0, 1)))+
     scale_y_continuous(limits = quantile(tt$g, c(0, 1)))+
-    scale_x_discrete(name="Longitude", breaks=seq(from=-220, by=20, to=-60), 
+    scale_x_discrete(name="Longitude", breaks=seq(from=-220, by=20, to=-60),
                      labels=c("-220","-200","-180","-160","-140","-120","-100","-80","-60"))+
     ylab("Move persistance")+
+    theme_bw()
+
+  windows()
+  plot(p3)
+  savePlot(filename="Figure_5mp_bin.pdf", type="pdf")
+  
+  p4<-ggplot(zspd)+
+    scale_fill_manual(values=c("#d95f02","#7570b3"), name="Species", labels=c("Chinstrap", "Elephant seal"))+
+    geom_boxplot(aes(x=bin, y=speed, fill=spp),outlier.shape=NA)+
+    coord_cartesian(ylim = quantile(tt$g, c(0, 1)))+
+    scale_y_continuous(limits = quantile(tt$g, c(0, 1)))+
+    scale_x_discrete(name="Longitude", breaks=seq(from=-220, by=20, to=-60), 
+                     labels=c("-220","-200","-180","-160","-140","-120","-100","-80","-60"))+
+    ylab("Speed (m/s)")+
     theme_bw()  
   
   windows()
-  plot(p3)
-  savePlot(filename="Figure_5mpbin.pdf", type="pdf")
-
+  plot(p4)
+  savePlot(filename="Figure_5sp_bin.pdf", type="pdf")
+  
+  # for each species, estimate mean speed within and outside 120-170W region
+  
+  zch<-zspd[zspd$spp=="CHPE",]
+  zes<-zspd[zspd$spp=="SES",]
+  zch$region<-ifelse(zch$lon> -170 & zch$lon< -120, TRUE, FALSE)
+  zes$region<-ifelse(zes$lon> -170 & zes$lon< -120, TRUE, FALSE)
+    
+  tapply(zch$speed, zch$region, mean)
+  tapply(zch$speed, zch$region, sd)
+  tapply(zes$speed, zes$region, mean)
+  tapply(zes$speed, zes$region, sd)
+  t.test(speed~region, data=zch)
+  t.est(speed~region, data=zes)
+  
 }
 
 

@@ -35,7 +35,41 @@ for (pk in list.of.packages) {
 }
 
 ```
+# define auxiliary function
 
+```{r plot for saving KDE data}
+save_kde_data<-function(tt){
+kdexy<-tt%>%
+  st_transform(4231)%>%
+  st_coordinates()%>%
+  as.data.frame()
+
+kdedata<-tt
+kdedata$lon<-kdexy$X
+kdedata$lat<-kdexy$Y
+kdedata$lon<-ifelse(kdedata$lon>0, kdedata$lon-360, kdedata$lon)
+
+kdedata<-kdedata[kdedata$month>3,]
+
+h1<-mean(c(width.SJ(kdedata$lon), bandwidth.nrd(kdedata$lon)))
+h2<-mean(c(width.SJ(kdedata$lat), bandwidth.nrd(kdedata$lat)))
+
+kdedata.chpe<-kdedata[kdedata$spp=="CHPE",]
+kdedata.ses<-kdedata[kdedata$spp=="SES",]
+f1<-kde2d(x=kdedata.chpe$lon, y=kdedata.chpe$lat, n = 100, h = c(h1, h2))
+f2<-kde2d(x=kdedata.ses$lon, y=kdedata.ses$lat, n = 100, h = c(h1, h2))
+
+imagePlot(f1)
+imagePlot(f2)
+
+chpe_kde<-as.data.frame(f1)
+ses_kde<-as.data.frame(f2)
+
+write.csv(chpe_kde, "chpe_kde.csv")
+write.csv(ses_kde, "ses_kde.csv")
+}
+```
+)
 # Define function for plotting
 
 ```{r Figure 3mp}
@@ -237,6 +271,9 @@ plot_figure_3mp<-function(){
     savePlot(filename=fn, type="pdf")
   }
   #now recreate this with a kernel density estimate for the projected points
+  
+  # run save_KDE_data here if needed to write kde results in lat/lon space.
+  save_kde_data(tt)
   
   ttxy<-sf::st_coordinates(tt)
   tt<-cbind(tt, ttxy)
